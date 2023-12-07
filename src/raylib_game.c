@@ -31,8 +31,8 @@ Sound fxCoin = { 0 };
 //----------------------------------------------------------------------------------
 // Local Variables Definition (local to this module)
 //----------------------------------------------------------------------------------
-static const int screenWidth = 1600;
-static const int screenHeight = 900;
+const int ScreenWidth = 1600;
+const int ScreenHeight = 900;
 
 // Required variables to manage screen transitions (fade-in, fade-out)
 static float transAlpha = 0.0f;
@@ -61,7 +61,7 @@ int main(void)
     //---------------------------------------------------------
     SetConfigFlags(FLAG_MSAA_4X_HINT);
 
-    InitWindow(screenWidth, screenHeight, "raylib game template");
+    InitWindow(ScreenWidth, ScreenHeight, "raylib game template");
 
     SetWindowState(FLAG_WINDOW_RESIZABLE);
 
