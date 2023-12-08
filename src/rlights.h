@@ -117,6 +117,10 @@ static int lightsCount = 0;    // Current amount of created lights
 // Module Functions Definition
 //----------------------------------------------------------------------------------
 
+void ClearLightIndex() {
+    lightsCount = 0;
+}
+
 // Create a light and get shader locations
 Light CreateLight(int type, Vector3 position, Vector3 target, Color color, Shader shader)
 {

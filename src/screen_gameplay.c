@@ -34,7 +34,6 @@
 
 #include <stdlib.h>
 
-
 #define RLIGHTS_IMPLEMENTATION
 #include "rlights.h"
 
@@ -42,7 +41,6 @@
 #include "raygui.h"
 
 #include "load_stl.h"
-
 
 // raygui embedded styles
 // #include "styles/style_cyber.h"       // raygui style: cyber
@@ -88,7 +86,11 @@ static Vector3 MeasureText3D(Font font, const char *text, float fontSize, float 
 void DrawSplineBasis3D(Vector3 *points, int pointCount, Color color);
 void DrawSplineSegmentBezierCubic3D(Vector3 p1, Vector3 c2, Vector3 c3, Vector3 p4, int segments, Color color, bool d );
 
+int CubeInstanceCount;
+Matrix *CubeInstances = 0;
+
 Camera GameCamera = { 0 };
+Mesh  GameCubeMesh;
 Model GameCube;
 Model GameSphere;
 Model GameTorus;
@@ -96,7 +98,13 @@ Model GameCylinder;
 Model GameCone;
 
 Shader GameShader;
+int    ShaderAmbientLoc;
+
 Shader FontShader;
+
+Material MatInstances;
+Shader InstancingShader;
+int InstancingAmbientLoc;
 
 Model GameModel;
 BoundingBox GameModelBounds;
@@ -107,7 +115,8 @@ Mesh GameStlMesh;
 
 Model GameStl;
 
-Light lights[MAX_LIGHTS] = { 0 };
+Light lights[4] = { 0 };
+Light InstancingLights[4] = { 0 };
 
 Font FontDefault = { 0 };
 Font FontSDF = { 0 };
@@ -122,7 +131,7 @@ Vector2 TextSize = { 0.0f, 0.0f };
 float FontSize = 16.0f;
 int CurrentFont = 0;            // 0 - fontDefault, 1 - FontSDF
 
-int Wobble = 0;
+int Dynamic = 0;
 
 // extern const int ScreenWidth;
 // extern const int ScreenHeight;
@@ -158,33 +167,62 @@ void InitGameplayScreen(void)
     // float cameraPos[3] = { GameCamera.position.x, GameCamera.position.y, GameCamera.position.z };
     // SetShaderValue(shader, shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
-    GameCube = LoadModelFromMesh(GenMeshCube(2.0f, 2.0f, 2.0f));
+    GameCubeMesh = GenMeshCube( 2.0f, 2.0f, 2.0f );
+    GameCube = LoadModelFromMesh(GenMeshCube( 2.0f, 2.0f, 2.0f ));
     GameSphere = LoadModelFromMesh( GenMeshSphere( 2.0, 32, 32 ));
     GameTorus = LoadModelFromMesh( GenMeshTorus( 0.5, 2.0, 32, 32 ));
     GameCone = LoadModelFromMesh( GenMeshCone( 0.5f, 2.0f, 32 ) );
     GameCylinder = LoadModelFromMesh( GenMeshCylinder( 1.0f, 2.0f, 32 ) );
 
     GameShader = LoadShader(TextFormat("resources/shaders/glsl%i/lighting.vs", GLSL_VERSION),
-                               TextFormat("resources/shaders/glsl%i/lighting.fs", GLSL_VERSION));
+                            TextFormat("resources/shaders/glsl%i/lighting.fs", GLSL_VERSION));
     
     // Get some required shader locations
     GameShader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(GameShader, "viewPos");
     // NOTE: "matModel" location name is automatically assigned on shader loading, 
     // no need to get the location again if using that uniform name
-    //shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocation(shader, "matModel");
-    
-    // Ambient light level (some basic lighting)
-    int ambientLoc = GetShaderLocation(GameShader, "ambient");
-    SetShaderValue(GameShader, ambientLoc, (float[4]){ 2.0f, 2.0f, 2.0f, 1.0f }, SHADER_UNIFORM_VEC4);
+    // GameShader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocation(GameShader, "matModel");
 
-    // Assign out lighting shader to model
-    GameCube.materials[0].shader = GameShader;
-    GameSphere.materials[0].shader = GameShader;
-    GameTorus.materials[0].shader = GameShader;
-    GameCylinder.materials[0].shader = GameShader;
-    GameCone.materials[0].shader = GameShader;
+    // Ambient light level (some basic lighting)
+    ShaderAmbientLoc = GetShaderLocation(GameShader, "ambient");
+    SetShaderValue(GameShader, ShaderAmbientLoc, (float[4]){ 2.0f, 2.0f, 2.0f, 1.0f }, SHADER_UNIFORM_VEC4);
+
+    // Load lighting shader
+    InstancingShader = LoadShader(TextFormat("resources/shaders/glsl%i/lighting_instancing.vs", GLSL_VERSION),
+                                  TextFormat("resources/shaders/glsl%i/lighting.fs", GLSL_VERSION));
+    // Get shader locations
+    InstancingShader.locs[SHADER_LOC_MATRIX_MVP] = GetShaderLocation(InstancingShader, "mvp");
+    InstancingShader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(InstancingShader, "viewPos");
+    InstancingShader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocationAttrib(InstancingShader, "instanceTransform");
+
+    // Set shader value: ambient light level
+    InstancingAmbientLoc = GetShaderLocation(InstancingShader, "ambient");
+    SetShaderValue(InstancingShader, InstancingAmbientLoc, (float[4]){ 2.0f, 2.0f, 2.0f, 2.0f }, SHADER_UNIFORM_VEC4);
+
+    // Create one light
+    // CreateLight(LIGHT_DIRECTIONAL, (Vector3){ 50.0f, 50.0f, 0.0f }, Vector3Zero(), WHITE, InstancingShader);
 
     // Create lights
+    ClearLightIndex();
+    InstancingLights[0] = CreateLight(LIGHT_POINT, (Vector3){ 0, 8, 20 }, Vector3Zero(), WHITE,    InstancingShader);
+    InstancingLights[1] = CreateLight(LIGHT_POINT, (Vector3){ 32, 32, 32 }, Vector3Zero(), RED,    InstancingShader);
+    InstancingLights[2] = CreateLight(LIGHT_POINT, (Vector3){ -32, 32, 32 }, Vector3Zero(), GREEN, InstancingShader);
+    InstancingLights[3] = CreateLight(LIGHT_POINT, (Vector3){ 32, 32, -32 }, Vector3Zero(), BLUE,  InstancingShader);
+
+    InstancingLights[0].enabled = true;
+    InstancingLights[1].enabled = false;
+    InstancingLights[2].enabled = false;
+    InstancingLights[3].enabled = false;
+
+    CubeInstanceCount = pow(2,18);
+    CubeInstances = (Matrix *)RL_CALLOC(CubeInstanceCount, sizeof(Matrix));  
+
+    MatInstances = LoadMaterialDefault();
+    MatInstances.shader = InstancingShader;
+    MatInstances.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+
+    // Create lights
+    ClearLightIndex();
     lights[0] = CreateLight(LIGHT_POINT, (Vector3){ 0, 8, 20 }, Vector3Zero(), WHITE, GameShader);
     lights[1] = CreateLight(LIGHT_POINT, (Vector3){ 32, 32, 32 }, Vector3Zero(), RED, GameShader);
     lights[2] = CreateLight(LIGHT_POINT, (Vector3){ -32, 32, 32 }, Vector3Zero(), GREEN, GameShader);
@@ -194,6 +232,13 @@ void InitGameplayScreen(void)
     lights[1].enabled = false;
     lights[2].enabled = false;
     lights[3].enabled = false;
+
+    // Assign out lighting shader to model
+    GameCube.materials[0].shader = GameShader;
+    GameSphere.materials[0].shader = GameShader;
+    GameTorus.materials[0].shader = GameShader;
+    GameCylinder.materials[0].shader = GameShader;
+    GameCone.materials[0].shader = GameShader;
 
     // Default font generation from TTF font
     // Loading file to memory
@@ -323,13 +368,38 @@ void UpdateGameplayScreen(void)
         GameCamera.position = Vector3RotateByAxisAngle( GameCamera.position, GameCamera.up, 0.01     );
     }
 
-    if (IsKeyPressed(KEY_W)) { lights[0].enabled = !lights[0].enabled; }
-    if (IsKeyPressed(KEY_R)) { lights[1].enabled = !lights[1].enabled; }
-    if (IsKeyPressed(KEY_G)) { lights[2].enabled = !lights[2].enabled; }
-    if (IsKeyPressed(KEY_B)) { lights[3].enabled = !lights[3].enabled; }
+    if (IsKeyDown(KEY_UP) ) {
+        Vector3 axis = Vector3CrossProduct( GameCamera.position, GameCamera.up );
+        GameCamera.position = Vector3RotateByAxisAngle( GameCamera.position, axis, -0.01 );
+    }
+
+    if ( IsKeyDown( KEY_DOWN ) ){
+        Vector3 axis = Vector3CrossProduct( GameCamera.position, GameCamera.up );
+        GameCamera.position = Vector3RotateByAxisAngle( GameCamera.position, axis, 0.01     );
+    }
+
+    if (IsKeyPressed(KEY_W)) { 
+        lights[0].enabled = !lights[0].enabled; 
+        InstancingLights[0].enabled = !InstancingLights[0].enabled; 
+    }
+    if (IsKeyPressed(KEY_R)) { 
+        lights[1].enabled = !lights[1].enabled; 
+        InstancingLights[1].enabled = !InstancingLights[1].enabled; 
+    }
+    if (IsKeyPressed(KEY_G)) { 
+        lights[2].enabled = !lights[2].enabled; 
+        InstancingLights[2].enabled = !InstancingLights[2].enabled; 
+    }
+    if (IsKeyPressed(KEY_B)) { 
+        lights[3].enabled = !lights[3].enabled; 
+        InstancingLights[3].enabled = !InstancingLights[3].enabled; 
+    }
 
     // Update light values (actually, only enable/disable them)
-    for (int i = 0; i < MAX_LIGHTS; i++) UpdateLightValues(GameShader, lights[i]);
+    for (int i = 0; i < 4; i++) {
+        UpdateLightValues(GameShader, lights[i]);
+        UpdateLightValues(InstancingShader, InstancingLights[i] );
+    }
 
     // Press enter or tap to change to ENDING screen
     if (IsKeyPressed(KEY_ENTER) )
@@ -375,7 +445,6 @@ void UpdateGameplayScreen(void)
     }
 
     // Ambient light level (some basic lighting)
-    int ambientLoc = GetShaderLocation(GameShader, "ambient");
     float f[4];
     if ( AmbientLight ) {
         f[0] = 1.0f;
@@ -388,7 +457,8 @@ void UpdateGameplayScreen(void)
         f[2] = 0.0f;
         f[3] = 0.0f;
     } 
-    SetShaderValue(GameShader, ambientLoc, f, SHADER_UNIFORM_VEC4);
+    SetShaderValue(GameShader, ShaderAmbientLoc, f, SHADER_UNIFORM_VEC4);
+    SetShaderValue(InstancingShader, InstancingAmbientLoc, f, SHADER_UNIFORM_VEC4);
 }
 
 // Gameplay Screen Draw logic
@@ -399,6 +469,7 @@ void DrawGameplayScreen(void)
     
     float cameraPos[3] = { GameCamera.position.x, GameCamera.position.y, GameCamera.position.z };
     SetShaderValue(GameShader, GameShader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
+    SetShaderValue(InstancingShader, InstancingShader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
 
     Vector2 pos = { 20, 10 };
 
@@ -424,9 +495,31 @@ void DrawGameplayScreen(void)
             DrawModel( GameCube, p, 1.0f, LIGHTGRAY );
         }
 
-        if ( Wobble ) {
+        if ( Dynamic ) {
             cycle += 0.01;
         }
+
+        // // Old busted joint
+        // int n = pow(2,16);
+        // float nsqr = sqrt( n );
+        // for ( int i = 0; i < n; i++ ) {
+        //     Vector3 l = (Vector3){ ((i)/nsqr-nsqr/2-0.5)*1.0f, -10, ((i)%(int)nsqr-nsqr/2-0.5)*1.0f };    
+        //     DrawModel( GameCube, l, 0.25f, WHITE );
+        // }
+
+        float nisqr = sqrt( CubeInstanceCount );
+
+        float scale = 0.25F;
+        Matrix matScale = MatrixScale(scale, scale, scale);
+        Matrix matRotation = MatrixRotate((Vector3){0,1,0}, 0 );
+        for ( int i = 0; i < CubeInstanceCount; i++ ) {
+            Vector3 l = (Vector3){ ((i)/(int)nisqr-nisqr/2-0.5)*1.0f, -12, ((i)%(int)nisqr-nisqr/2-0.5)*1.0f };    
+            Matrix matTranslation = MatrixTranslate(l.x, l.y, l.z);
+
+            CubeInstances[i] = MatrixMultiply(MatrixMultiply(matScale, matRotation), matTranslation);
+        }
+
+        DrawMeshInstanced( GameCubeMesh, MatInstances, CubeInstances, CubeInstanceCount );
 
         BeginShaderMode( FontShader);    // Activate SDF font shader
             Vector3 mt = MeasureText3D(FontSDF, "SPHERE", 32,0, 0 );
@@ -499,7 +592,7 @@ void DrawGameplayScreen(void)
 
         GuiSetIconScale(1);
 
-        GuiToggleSlider( (Rectangle){ 130, 120, 200, 32 }, "Static;Wobble", &Wobble );
+        GuiToggleSlider( (Rectangle){ 130, 120, 200, 32 }, "Static;Dynamic", &Dynamic );
 
         int fps = GetFPS();
         GuiValueBox((Rectangle){ 130, 160, 200, 32 }, 0, &fps, 0, 1000, false );
@@ -511,6 +604,8 @@ void DrawGameplayScreen(void)
         GuiToggle( (Rectangle){ 210, 240, 30, 32 }, "G", &lights[2].enabled );
         GuiToggle( (Rectangle){ 250, 240, 30, 32 }, "B", &lights[3].enabled );
         GuiToggle( (Rectangle){ 290, 240, 30, 32 }, "A", &AmbientLight );
+        for ( int i = 0; i < 4; i++ )
+            InstancingLights[i].enabled=lights[i].enabled;
     
     EndShaderMode();
 }
