@@ -214,7 +214,7 @@ void InitGameplayScreen(void)
     InstancingLights[2].enabled = false;
     InstancingLights[3].enabled = false;
 
-    CubeInstanceCount = pow(2,18);
+    CubeInstanceCount = pow(2,8);
     CubeInstances = (Matrix *)RL_CALLOC(CubeInstanceCount, sizeof(Matrix));  
 
     MatInstances = LoadMaterialDefault();

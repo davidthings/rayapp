@@ -31,8 +31,8 @@ Sound fxCoin = { 0 };
 //----------------------------------------------------------------------------------
 // Local Variables Definition (local to this module)
 //----------------------------------------------------------------------------------
-const int ScreenWidth = 1600;
-const int ScreenHeight = 900;
+const int ScreenWidth = 640;
+const int ScreenHeight = 480;
 
 // Required variables to manage screen transitions (fade-in, fade-out)
 static float transAlpha = 0.0f;
